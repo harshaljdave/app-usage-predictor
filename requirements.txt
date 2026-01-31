@@ -1,0 +1,9 @@
+torch
+numpy
+pandas
+scikit-learn
+mlxtend           # For FP-Growth
+plotly
+dash              # For dashboard
+pytest
+jupyter
