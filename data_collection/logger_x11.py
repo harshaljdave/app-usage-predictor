@@ -6,31 +6,96 @@ POLL_INTERVAL = 3
 IDLE_THRESHOLD = 300
 
 
-def get_active_app():
-    """Get active app via xdotool + /proc"""
+def get_window_info():
+    """Get active window process AND title"""
     try:
         win_id = subprocess.check_output(
             ["xdotool", "getactivewindow"],
             stderr=subprocess.DEVNULL
         ).decode().strip()
         
+        # Get PID for process name
         pid = subprocess.check_output(
             ["xdotool", "getwindowpid", win_id],
             stderr=subprocess.DEVNULL
         ).decode().strip()
         
         with open(f"/proc/{pid}/comm") as f:
-            return f.read().strip()
+            process = f.read().strip()
+        
+        # Get window title
+        title = subprocess.check_output(
+            ["xdotool", "getwindowname", win_id],
+            stderr=subprocess.DEVNULL
+        ).decode().strip()
+        
+        return process, title
     except:
-        return None
+        return None, None
 
 
-def normalize_app_name(raw_name):
-    """Normalize app names"""
-    if not raw_name:
-        return None
+def parse_chrome_title(title):
+    """Extract profile and domain from Chrome window title
     
-    normalizations = {
+    Examples:
+    "GitHub - Google Chrome" -> chrome:github.com
+    "Gmail - Work - Google Chrome" -> chrome:work:gmail
+    "YouTube - Profile 1 - Google Chrome" -> chrome:profile_1:youtube
+    """
+    # Remove " - Google Chrome" suffix
+    title = title.replace(" - Google Chrome", "")
+    title = title.replace(" - Chromium", "")
+    
+    parts = [p.strip() for p in title.split(" - ")]
+    
+    # Check if profile name is present (usually second-to-last)
+    if len(parts) >= 2:
+        profile = parts[-1].lower().replace(" ", "_")
+        page = parts[0].lower()
+        
+        # Extract domain-like info from page title
+        # "GitHub" -> "github", "Gmail" -> "gmail"
+        domain = page.split()[0] if page else "unknown"
+        
+        if profile in ['default', 'person 1', 'profile 1']:
+            return f"chrome:{domain}"
+        else:
+            return f"chrome:{profile}:{domain}"
+    
+    # Fallback
+    page = parts[0].lower().split()[0] if parts else "unknown"
+    return f"chrome:{page}"
+
+
+def parse_terminal_title(title):
+    """Extract context from terminal title
+    
+    Examples:
+    "~/projects/app-predictor — Konsole" -> terminal:app-predictor
+    "git push — Konsole" -> terminal:git
+    "user@host: ~/Documents" -> terminal:documents
+    """
+    # Remove terminal app name
+    title = title.replace(" — Konsole", "")
+    title = title.replace(" - Terminal", "")
+    
+    # Extract directory or command
+    if "~/" in title or "/" in title:
+        # Directory shown
+        path = title.split(":")[-1].strip() if ":" in title else title
+        dir_name = path.strip("~/").split("/")[-1] or "home"
+        return f"terminal:{dir_name}"
+    else:
+        # Command shown
+        cmd = title.split()[0].lower()
+        return f"terminal:{cmd}"
+
+
+def normalize_app_name(process, title):
+    """Enhanced normalization with title parsing"""
+    
+    # Basic normalizations
+    base_normalizations = {
         'google-chrome': 'chrome',
         'chrome-browser': 'chrome',
         'firefox-esr': 'firefox',
@@ -39,8 +104,15 @@ def normalize_app_name(raw_name):
         'gnome-terminal': 'terminal',
     }
     
-    name = raw_name.lower().strip()
-    return normalizations.get(name, name)
+    process = base_normalizations.get(process.lower(), process.lower())
+    
+    # Enhanced parsing for Chrome and Terminal
+    if process == 'chrome' and title:
+        return parse_chrome_title(title)
+    elif process == 'terminal' and title:
+        return parse_terminal_title(title)
+    
+    return process
 
 
 def get_idle_time():
@@ -67,14 +139,13 @@ def is_locked():
 
 
 def run_logger():
-    """Main logging loop"""
+    """Main logging loop with title parsing"""
     conn = init_db()
     logger = EventLogger(conn)
     last_app = None
     
-    print("🚀 X11 logger started")
+    print("🚀 X11 logger started (with title parsing)")
     print(f"📊 Polling every {POLL_INTERVAL}s")
-    print(f"💤 Idle threshold: {IDLE_THRESHOLD}s")
     print("-" * 50)
     
     while True:
@@ -89,8 +160,8 @@ def run_logger():
                 time.sleep(POLL_INTERVAL)
                 continue
             
-            raw_app = get_active_app()
-            app = normalize_app_name(raw_app)
+            process, title = get_window_info()
+            app = normalize_app_name(process, title) if process else None
             
             if app and app != last_app:
                 logger.log_event(app, 'focus')
@@ -104,10 +175,6 @@ def run_logger():
             print(f"⚠️  Error: {e}")
         
         time.sleep(POLL_INTERVAL)
-    
-    # Summary
-    recent = logger.get_recent_events(10)
-    print(f"\nLogged {len(recent)} recent events")
     
     conn.close()
 
