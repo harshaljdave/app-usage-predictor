@@ -68,6 +68,7 @@ def extract_sessions(conn, output_conn=None):
     
     # Insert into app_sessions
     out_cur = output_conn.cursor()
+    out_cur.execute("DELETE FROM app_sessions")
     for start, end, apps in sessions:
         out_cur.execute("""
             INSERT INTO app_sessions (start_time, end_time, apps)

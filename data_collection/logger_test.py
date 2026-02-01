@@ -74,7 +74,7 @@ def generate_day(conn, date, noise=0.15):
         
         # Random session length: 2-15 minutes
         current_time += random.randint(120, 900)
-    
+        current_time += random.randint(120, 1200)
     # Insert into database
     cur = conn.cursor()
     cur.executemany(
