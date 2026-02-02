@@ -1,34 +1,34 @@
 # App Usage Prediction System
 
-A hybrid machine learning system that learns laptop usage patterns and predicts which application you'll use next.
+A hybrid machine learning system that learns laptop usage patterns and predicts which application you'll use next. Built for Linux/X11 with live prediction dashboard and online learning.
 
-[![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 ## 🎯 Overview
 
-This project implements a **hybrid prediction system** combining three complementary ML approaches:
-- **Temporal Convolutional Network (TCN)** for short-term sequential patterns
-- **Skip-gram embeddings** for long-term co-usage relationships  
-- **Association rules** for stable habit patterns
+Predicts next-app usage by combining three complementary ML approaches:
+- **Temporal Convolutional Network (TCN)** — Short-term sequential patterns (12h memory)
+- **Skip-gram embeddings** — Long-term co-usage relationships
+- **Association rules** — Stable workflow habits with explainability
 
-Trained on self-collected usage data from a Linux development workstation.
+Self-collected dataset on Fedora/KDE with enhanced window title parsing (e.g., `chrome:work:gmail`, `terminal:project-dir`).
 
 ## 📊 Performance
 
-Evaluated on 94 test samples (20% holdout, temporal split):
+Evaluated on synthetic data (101 test samples, 6 apps):
 
 | Model | Hit@1 | Hit@3 | Hit@5 | MRR |
 |-------|-------|-------|-------|-----|
-| **Baseline** (frequency) | 27.7% | 75.5% | 97.9% | 0.529 |
-| **Hybrid** (optimized) | **37.2%** | **81.9%** | **97.9%** | **0.597** |
+| Baseline (frequency) | 34.7% | 81.2% | 97.0% | 0.598 |
+| **Hybrid (optimized)** | 32.7% | **85.1%** | 99.0% | 0.583 |
 
-**Key Result**: Hybrid approach achieves **34% improvement** over baseline on Hit@1.
+**Key insight:** Hybrid leads on Hit@3 (+4.8%), the metric that matters for real usage. Baseline competitive on Hit@1 due to limited vocabulary — hybrid expected to differentiate clearly with real data (more apps, varied patterns).
 
 ## 🏗️ Architecture
 ```
 ┌─────────────────────────────────┐
-│   X11 Window Events + Titles    │
+│   X11 Events + Window Titles    │
 │   chrome:work:github            │
 │   terminal:app-predictor        │
 └────────────┬────────────────────┘
@@ -54,35 +54,30 @@ Evaluated on 94 test samples (20% holdout, temporal split):
     └───────┼────────┘
             ▼
     ┌──────────────┐
-    │ Context Vec  │
-    │  (12-dim)    │
-    └──────┬───────┘
-           ▼
-    ┌──────────────┐
-    │Weighted Fusion│
-    │α=0.5 β=0.3 γ=0.2│
-    └──────┬───────┘
-           ▼
-    Top-K Predictions
+    │ Weighted     │
+    │ Fusion       │
+    │ α=0.5 β=0.3  │
+    │ γ=0.2        │
+    └──────────────┘
 ```
 
 ### Model Components
 
-**1. TCN (Temporal Convolutional Network)**
-- Input: Last 24 buckets (12 hours) of app usage
-- Architecture: 3 dilated causal conv blocks [1,2,4]
-- Output: Next-app probability distribution
-- Purpose: Captures short-term sequential dependencies
+**TCN (Temporal Convolutional Network)**
+- 3 dilated causal conv blocks [1, 2, 4]
+- 7,430 parameters
+- Input: 24 buckets (12 hours) × num_apps
+- Output: Next-bucket probability distribution
 
-**2. App Embeddings** (Skip-gram)
-- 16-dimensional dense vectors per app
-- Trained on session co-occurrence
-- Purpose: Learns "VSCode and Terminal are similar"
+**App Embeddings** (Skip-gram)
+- 16-dimensional dense vectors
+- Trained per-session (online updates)
+- Captures "VSCode and Terminal are similar"
 
-**3. Association Rules** (FP-Growth)
-- Mines patterns like `{VSCode, Terminal} → GitHub (0.81 conf)`
-- 126 rules discovered (min_support=5, min_conf=0.6)
-- Purpose: Stable workflow habits
+**Association Rules** (FP-Growth)
+- Mined 63 itemsets, 122 rules
+- Example: `{VSCode, Terminal} → Chrome (conf=0.81)`
+- Weekly re-mining (stable patterns)
 
 ## 🚀 Quick Start
 
@@ -92,64 +87,119 @@ Evaluated on 94 test samples (20% holdout, temporal split):
 git clone https://github.com/yourusername/app-usage-predictor
 cd app-usage-predictor
 
-# Create environment
-conda create -n pattern python=3.9
+# Create environment (Python 3.12)
+conda create -n pattern python=3.12
 conda activate pattern
 
 # Install dependencies
-pip install torch numpy pandas scikit-learn mlxtend plotly jupyter
+pip install -r requirements.txt
+
+# Install X11 tools (Fedora/RHEL)
+sudo dnf install xdotool xprintidle
+
+# Or on Ubuntu/Debian
+sudo apt install xdotool xprintidle
 ```
 
 ### Data Collection
 
 **Start logger** (requires X11 session):
 ```bash
-python data_collection/logger_x11.py
+bash scripts/collect_data.sh start
+```
+
+**Check status:**
+```bash
+bash scripts/collect_data.sh status
 ```
 
 Logger captures:
 - Application focus changes
-- Window titles (e.g., `chrome:work:gmail`, `terminal:project-dir`)
-- Idle/lock detection (pauses logging)
+- Window titles → `chrome:profile:domain`, `terminal:directory`
+- Idle/lock detection (auto-pauses)
+- **Online embedding updates** at session end
 
-Recommended: Run for **2-3 weeks** for sufficient training data.
+**Recommended:** Run for 2-3 weeks for robust training data.
 
 ### Training
 ```bash
-# Train all models (baseline + TCN + embeddings + rules)
-python training/train_all.py --db usage.db --output outputs/models
+# Train all models on collected data
+bash scripts/train_models.sh
+
+# Or use synthetic data for testing
+bash scripts/train_models.sh --synthetic
 ```
 
-Expected output:
+Output:
 ```
 [1/6] Preprocessing data...
-✓ Aggregated 2094 events into 588 buckets
+✓ Aggregated 2961 events into 621 buckets
 ✓ Vocabulary size: 6 apps
 
-[2/6] Training baseline model...
-✓ Baseline saved
-
-[3/6] Building TCN dataset...
-Train samples: 451, Val samples: 113
-
-[4/6] Training TCN...
-Epoch 20/20 - Train Loss: 0.317, Val Loss: 0.536
-✓ TCN saved
-
-[5/6] Training embeddings...
-✓ Embeddings saved
-
-[6/6] Mining association rules...
-✓ Mined 63 itemsets, 126 rules
+[2/6] Training baseline...
+[3/6] Training TCN...
+[4/6] Training embeddings...
+[5/6] Mining association rules...
+[6/6] Complete
 ```
 
 ### Evaluation
 ```bash
-# Run ablation study
-python evaluation/ablation.py --db usage.db --models outputs/models
+# Run ablation study + generate visualizations
+bash scripts/evaluate.sh
+
+# Visualizations saved to outputs/figures/
 ```
 
-## 💻 Usage Example
+## 📊 Live Dashboard
+
+Run the interactive dashboard:
+```bash
+python inference/dashboard.py
+```
+
+Open `http://127.0.0.1:8050` in your browser.
+
+**Features:**
+- **Live Top-5 predictions** with confidence bars
+- **Multi-horizon predictions** (next 30min / 1.5h / 3h)
+- **Prediction accuracy tracking** with rolling history
+- **Recent activity timeline**
+- Auto-refreshes every 5 seconds
+
+**Note:** Edit `DB_PATH` in `dashboard.py` to switch between `usage.db` (real) and `usage_synthetic.db` (test).
+
+## 💻 Standalone Prediction
+
+Test models from command line without dashboard:
+```bash
+# Quick prediction
+python inference/predict.py
+
+# With multi-horizon
+python inference/predict.py --multi-horizon
+
+# On synthetic data
+python inference/predict.py --db usage_synthetic.db --top-k 3
+```
+
+Output:
+```
+Loading models...
+✓ Models loaded (6 apps)
+
+📍 Context: Recent apps = vscode, terminal, chrome
+
+🔮 Top-5 Predictions:
+
+  1. chrome                     0.905  ████████████████████
+  2. vscode                     0.889  █████████████████
+  3. terminal                   0.803  ████████████████
+  4. slack                      0.762  ███████████████
+  5. spotify                    0.552  ███████████
+```
+
+## 📖 Usage Example
 ```python
 from models.hybrid import HybridPredictor
 from models.tcn_model import load_tcn
@@ -164,7 +214,6 @@ emb_model.load("outputs/models/app_embeddings.pkl")
 rule_miner = AssociationRuleMiner()
 rule_miner.load("outputs/models/association_rules.pkl")
 
-# Create hybrid predictor
 hybrid = HybridPredictor(tcn_model, vocab, emb_model, rule_miner)
 
 # Prepare context
@@ -172,7 +221,7 @@ context = {
     'recent_window': recent_usage_matrix,  # (24, num_apps)
     'recent_apps': ['vscode', 'terminal'],
     'timestamp': int(time.time()),
-    'usage_stats': {...}  # Rolling statistics
+    'usage_stats': {}  # Rolling statistics
 }
 
 # Get predictions
@@ -182,20 +231,11 @@ for app, score in predictions:
     print(f"{app}: {score:.3f}")
 ```
 
-Output:
-```
-chrome: 0.905
-vscode: 0.889
-terminal: 0.803
-slack: 0.762
-spotify: 0.552
-```
-
 ## 📁 Project Structure
 ```
 app-usage-predictor/
 ├── data_collection/
-│   ├── logger_x11.py          # Main data collector (X11)
+│   ├── logger_x11.py          # Main logger (with online embeddings)
 │   ├── logger_test.py         # Synthetic data generator
 │   └── db_core.py             # Database schemas
 │
@@ -207,7 +247,7 @@ app-usage-predictor/
 │   ├── baseline.py            # Frequency-based baseline
 │   ├── tcn_model.py           # Temporal CNN
 │   ├── embeddings.py          # Skip-gram embeddings
-│   ├── association_rules.py   # FP-Growth rule mining
+│   ├── association_rules.py   # FP-Growth rules
 │   └── hybrid.py              # Combined predictor
 │
 ├── training/
@@ -215,154 +255,155 @@ app-usage-predictor/
 │
 ├── evaluation/
 │   ├── metrics.py             # Hit@K, MRR, Precision
-│   └── ablation.py            # Model comparison
+│   ├── ablation.py            # Model comparison
+│   └── visualize.py           # Generate 6 Plotly charts
+│
+├── inference/
+│   ├── predict.py             # CLI prediction tool
+│   ├── dashboard.py           # Live Dash dashboard
+│   └── multi_horizon.py       # Autoregressive predictions
+│
+├── notebooks/
+│   ├── 01_data_exploration.ipynb
+│   ├── 02_model_comparison.ipynb
+│   └── 03_results_visualization.ipynb
+│
+├── scripts/
+│   ├── collect_data.sh        # Start/stop/status logger
+│   ├── train_models.sh        # Run training pipeline
+│   └── evaluate.sh            # Run evaluation + viz
 │
 └── outputs/
-    ├── models/                # Trained model weights
-    └── logs/                  # Training logs
+    ├── models/                # Trained weights (.pt, .pkl)
+    ├── figures/               # 6 HTML visualizations
+    └── logs/                  # Logger output
 ```
 
 ## 🔬 Technical Details
 
 ### Data Processing
+- **Time bucketing:** 30-minute intervals reduce noise
+- **Sessionization:** Idle gaps >15 minutes define boundaries
+- **Features:** Cyclic time encoding (sin/cos), rolling statistics (24h/7d/14d), recency
 
-**Time Bucketing**: Events aggregated into 30-minute intervals
-- Reduces noise from rapid window switching
-- Enables efficient temporal modeling
+### Model Hyperparameters
 
-**Sessionization**: Idle gaps >15 minutes define session boundaries
-- Used for training embeddings and mining rules
-- Average session: 8-12 app transitions
-
-**Feature Engineering**:
-- Cyclic time encoding (sin/cos for hour/day)
-- Rolling statistics (24h, 7d, 14d usage counts)
-- Recency features (buckets since last use)
-
-### Model Architecture
-
-**TCN Hyperparameters**:
-- Hidden dim: 32
-- Kernel size: 3
-- Dilations: [1, 2, 4]
+**TCN:**
+- Hidden dim: 32, Kernel: 3, Dilations: [1, 2, 4]
 - Receptive field: 12 hours
-- Parameters: 7,430
 - Training: Adam (lr=1e-3), 20 epochs
+- Converges at epoch 4 (validation loss plateaus)
 
-**Embedding Hyperparameters**:
-- Dimension: 16
-- Window: 2 (skip-gram context)
+**Embeddings:**
+- Dimension: 16, Window: 2 (skip-gram)
 - Learning rate: 0.01
-- Training: Online (5 passes)
+- **Online updates:** Per-session at idle threshold
 
-**Fusion Weights** (optimized):
-- α (TCN): 0.5
-- β (Embeddings): 0.3
-- γ (Rules): 0.2
+**Association Rules:**
+- Min support: 5, Min confidence: 0.6
+- Max itemset size: 3
 
-### Memory & Performance
+**Fusion Weights (optimized):**
+- TCN: 0.5, Embeddings: 0.3, Rules: 0.2
 
-- Model size: ~15MB total
-- Inference latency: <100ms (target)
-- Memory footprint: ~80MB runtime
-- Training time: ~2 minutes (CPU)
+### Performance
+- **Model size:** ~15MB total
+- **Training time:** ~2 minutes (CPU)
+- **Memory footprint:** ~80MB runtime
+- **Inference latency:** <100ms (target)
+
+### Online Learning Strategy / Periodic Retraining
+
+**What updates online:**
+- ✅ **Embeddings** — per-session updates in logger (cheap, no forgetting risk)
+- ✅ **Predictions** — logged to `model_predictions` table for accuracy tracking
+
+**What doesn't:**
+- ❌ **TCN** — periodic retrain (weekly) avoids catastrophic forgetting
+- ❌ **Rules** — weekly/monthly re-mining (stable patterns)
 
 ## ⚠️ Limitations
 
-**Granularity**:
-- Tracks application-level focus, not URLs or commands
-- Window title parsing provides some context (e.g., `chrome:work:gmail`)
-- Misses background processes (e.g., Spotify while coding)
+**Granularity:**
+- Tracks application-level focus, not URLs or terminal commands
+- Window title parsing adds context (e.g., `chrome:work:gmail`) but not full content
+- Background processes ignored (e.g., Spotify while coding)
 
-**Platform**:
+**Platform:**
 - Requires X11 session (Wayland restricts window introspection)
 - Linux-specific (uses xdotool, xprintidle)
-- Could be adapted for Windows/macOS
+- Could adapt for Windows/macOS/Android with platform-specific APIs
 
-**Dataset**:
-- Synthetic data used for development (21 days, 2094 events)
-- Real data collection ongoing (need 2-3 weeks for robust training)
-- Single-user patterns (not population-level)
+**Architecture:**
+- Logger couples data collection with embedding training (convenience over purity)
+- For proffesional/production: separate `embedding_updater.py` daemon recommended
 
-**Model**:
+**Dataset:**
+- Synthetic data has limited diversity (6 apps, repetitive patterns)
+- Real data collection ongoing (need 2-3 weeks for robust evaluation)
+
+**Model:**
 - Vocabulary limited to frequently used apps (min_count=10)
 - Cold start problem for new apps
-- No temporal drift adaptation yet
+- No temporal drift adaptation yet (planned)
 
-## 🔮 Future Work
 
-**Short-term** (planned):
-- Retrain on real usage data (2-3 weeks collection)
-- Add visualization dashboard (Plotly/Streamlit)
-- Statistical significance testing (bootstrap CI)
-
-**Medium-term** (possible):
+## 🔮 Possible Future Work
 - Contextual bandits for active recommendations
+- User feedback collection (click/dismiss)
 - Browser extension for URL-level tracking
 - Shell integration for command-level context
-
-**Long-term** (research):
 - Cross-device learning (laptop + phone)
 - Federated learning for privacy
-- Multi-task prediction (app + duration + time-to-next)
-
-## 📊 Ablation Study Results
-
-Detailed comparison of model variants:
-
-| Variant | Description | Hit@1 | Hit@3 | MRR |
-|---------|-------------|-------|-------|-----|
-| Baseline | Time-of-day + transitions | 0.277 | 0.755 | 0.529 |
-| Hybrid (equal) | α=0.33, β=0.33, γ=0.34 | 0.372 | 0.819 | 0.597 |
-| Hybrid (TCN-heavy) | α=0.7, β=0.15, γ=0.15 | 0.372 | 0.819 | 0.597 |
-| **Hybrid (optimized)** | **α=0.5, β=0.3, γ=0.2** | **0.372** | **0.819** | **0.597** |
-
-**Insights**:
-- All hybrid variants outperform baseline
-- Weight sensitivity not visible on synthetic data
-- Expect differentiation with real data (more complex patterns)
 
 ## 🛠️ Development
 
-**Run tests**:
+**Run tests:**
 ```bash
 pytest tests/
 ```
 
-**Generate synthetic data** (for testing):
+**Generate synthetic data:**
 ```bash
 python data_collection/logger_test.py
 ```
 
-**Inspect database**:
+**Inspect database:**
 ```bash
 sqlite3 usage.db "SELECT COUNT(*) FROM app_events"
-sqlite3 usage.db "SELECT app_id, COUNT(*) as cnt FROM app_events GROUP BY app_id ORDER BY cnt DESC"
+sqlite3 usage.db "SELECT app_id, COUNT(*) FROM app_events GROUP BY app_id ORDER BY COUNT(*) DESC"
 ```
 
-## 📝 Citation
-
-If you use this project, please reference:
-```
-@misc{appusagepredictor2026,
-  author = {Your Name},
-  title = {Hybrid App Usage Prediction System},
-  year = {2026},
-  url = {https://github.com/yourusername/app-usage-predictor}
-}
+**Verify setup:**
+```bash
+bash scripts/verify_setup.sh
 ```
 
 ## 📄 License
 
 MIT License - see [LICENSE](LICENSE) file.
 
-## 🙏 Acknowledgments
+## 🙏 Attribution
 
-Algorithms implemented:
-- TCN: Bai et al., 2018
-- Skip-gram: Mikolov et al., 2013
-- FP-Growth: Han et al., 2000
+If you use or build upon this work, please consider crediting the original author:
 
+**Harshal Dave**  
+GitHub: [harshaljdave/app-usage-predictor](https://github.com/harshaljdave/app-usage-predictor)
+
+For academic use:
+```bibtex
+@misc{dave2026apppredictor,
+  author = {Dave, Harshal},
+  title = {Hybrid App Usage Prediction System},
+  year = {2026},
+  publisher = {GitHub},
+  url = {https://github.com/harshaljdave/app-usage-predictor}
+}
+```
 ---
 
-**Status**: ✅ Core system complete | 🔄 Real data collection ongoing | 📝 Documentation in progress
+**Status:** Core system complete · Real data collection ongoing · Dashboard live
+
+**Tech Stack:** Python 3.12 · PyTorch · SQLite · Dash · Plotly · X11
+
+**Author:** [Harshal Dave] · M.Tech Student · [SVNIT]

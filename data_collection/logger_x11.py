@@ -1,5 +1,11 @@
 import time
 import subprocess
+import sys
+from pathlib import Path
+
+# Add parent directory to path for imports
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
 from db_core import EventLogger, init_db
 
 POLL_INTERVAL = 3
@@ -93,6 +99,15 @@ def parse_terminal_title(title):
 
 def normalize_app_name(process, title):
     """Enhanced normalization with title parsing"""
+    blocklist = {
+        'plasma-systemmo', 'plasmashell', 'kwin_x11',
+        'kwin', 'baloo_desktop', 'networkmanager',
+        'pulseaudio', 'pipewire', 'dbus-daemon', 'systemd',
+        'sh', 'grep', 'xdotool', 'xprintidle'
+    }
+
+    if process.lower() in blocklist:
+        return None
     
     # Basic normalizations
     base_normalizations = {
@@ -102,6 +117,7 @@ def normalize_app_name(process, title):
         'code': 'vscode',
         'konsole': 'terminal',
         'gnome-terminal': 'terminal',
+        'kthreadd': 'github'
     }
     
     process = base_normalizations.get(process.lower(), process.lower())
@@ -143,7 +159,24 @@ def run_logger():
     conn = init_db()
     logger = EventLogger(conn)
     last_app = None
-    
+    current_session = []
+
+    from models.embeddings import AppEmbeddings
+    from data_processing.preprocessing import build_vocab
+
+    try:
+        vocab = build_vocab(conn, min_count=3)  # Lower threshold for live data
+        emb_model = AppEmbeddings(vocab)
+        emb_path = Path(__file__).parent.parent / "outputs/models/app_embeddings.pkl"
+        if emb_path.exists():
+            emb_model.load(emb_path)
+            print(f"✓ Embeddings loaded ({len(vocab)} apps)")
+        else:
+            print("⚠️  No saved embeddings, starting fresh")
+    except Exception as e:
+        emb_model = None
+        print(f"⚠️  Embeddings disabled: {e}")
+
     print("🚀 X11 logger started (with title parsing)")
     print(f"📊 Polling every {POLL_INTERVAL}s")
     print("-" * 50)
@@ -156,6 +189,14 @@ def run_logger():
                 continue
             
             if get_idle_time() > IDLE_THRESHOLD:
+                if current_session and emb_model:
+                    try:
+                        emb_model.train_session(current_session, window=2)
+                        emb_model.save(Path(__file__).parent.parent / "outputs/models/app_embeddings.pkl")
+                        print(f"  ↻ Session ended, embeddings updated ({len(current_session)} apps)")
+                    except Exception as e:
+                        print(f"  ⚠️  Embedding update failed: {e}")
+                current_session = []
                 last_app = None
                 time.sleep(POLL_INTERVAL)
                 continue
@@ -166,6 +207,7 @@ def run_logger():
             if app and app != last_app:
                 logger.log_event(app, 'focus')
                 print(f"✓ {time.strftime('%H:%M:%S')} | {app}")
+                current_session.append(app)
                 last_app = app
             
         except KeyboardInterrupt:

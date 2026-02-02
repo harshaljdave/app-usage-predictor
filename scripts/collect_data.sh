@@ -24,7 +24,7 @@ case "$1" in
 
         echo "🚀 Starting logger..."
         cd "$PROJECT_DIR"
-        nohup python data_collection/logger_x11.py >> "$LOG_FILE" 2>&1 &
+        nohup python -u data_collection/logger_x11.py >> "$LOG_FILE" 2>&1 &
         echo $! > "$PID_FILE"
         echo "✓ Logger started (PID: $(cat $PID_FILE))"
         echo "📝 Log: $LOG_FILE"

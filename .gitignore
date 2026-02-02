@@ -19,6 +19,9 @@ build/
 *.db-shm
 *.db-wal
 
+#python scripts in notebooks
+notebooks/*.py
+
 # Model weights (large files)
 *.pt
 *.pkl
@@ -39,7 +42,4 @@ outputs/logs/*.pid
 .DS_Store
 Thumbs.db
 
-# Exceptions (keep small examples)
-IMPLEMENTATION_PLAN.md
-IMPLEMENTATION_PLAN_UPDATED.md
-plan.pdf
+/files
